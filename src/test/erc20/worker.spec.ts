@@ -7,6 +7,7 @@ import { ContractOverwrite } from '../../blockchains/erc20/lib/contract_overwrit
 import helpers from './helpers';
 import { ERC20Transfer } from '../../blockchains/erc20/erc20_types';
 import { MockWeb3Wrapper } from '../eth/mock_web3_wrapper';
+import { KafkaStorage } from '../../lib/kafka_storage';
 
 
 
@@ -79,7 +80,7 @@ describe('Test ERC20 worker', function () {
         sinon.stub(worker, 'ethClient').value(new MockEthClient())
         sinon.stub(worker, 'getPastEventsFun').resolves([originalEvent]);
 
-        await worker.init(undefined);
+        await worker.init(sinon.createStubInstance(KafkaStorage));
         worker.lastConfirmedBlock = 1;
         worker.lastExportedBlock = 0;
 
@@ -98,7 +99,7 @@ describe('Test ERC20 worker', function () {
         sinon.stub(worker, 'web3Wrapper').value(new MockWeb3Wrapper(1))
         sinon.stub(worker, 'ethClient').value(new MockEthClient())
         sinon.stub(worker, 'getPastEventsFun').resolves([originalEvent]);
-        await worker.init(undefined);
+        await worker.init(sinon.createStubInstance(KafkaStorage));
 
         sinon.stub(worker, 'contractsOverwriteArray').value([new ContractOverwrite(
             {
@@ -135,7 +136,7 @@ describe('Test ERC20 worker', function () {
         sinon.stub(worker, 'web3Wrapper').value(new MockWeb3Wrapper(1))
         sinon.stub(worker, 'ethClient').value(new MockEthClient())
         sinon.stub(worker, 'getPastEventsFun').resolves([originalEvent]);
-        await worker.init(undefined);
+        await worker.init(sinon.createStubInstance(KafkaStorage));
 
         sinon.stub(worker, 'contractsOverwriteArray').value([new ContractOverwrite(
             {
@@ -174,7 +175,7 @@ describe('Test ERC20 worker', function () {
         sinon.stub(worker, 'ethClient').value(new MockEthClient())
         sinon.stub(worker, 'getPastEventsFun').resolves([originalEvent, originalEvent2]);
 
-        await worker.init(undefined);
+        await worker.init(sinon.createStubInstance(KafkaStorage));
 
         sinon.stub(worker, 'contractsOverwriteArray').value([new ContractOverwrite(
             {

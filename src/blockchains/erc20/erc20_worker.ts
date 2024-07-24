@@ -5,7 +5,7 @@ import { constructRPCClient } from '../../lib/http_client';
 import { extendEventsWithPrimaryKey } from './lib/extend_events_key';
 import { ContractOverwrite, changeContractAddresses, extractChangedContractAddresses } from './lib/contract_overwrite';
 import { stableSort, readJsonFile } from './lib/util';
-import { BaseWorker } from '../../lib/worker_base';
+import { BaseWorker, WorkResult, WorkResultMultiMode } from '../../lib/worker_base';
 import { nextIntervalCalculator, setWorkerSleepTime, analyzeWorkerContext, NO_WORK_SLEEP } from '../eth/lib/next_interval_calculator';
 import { Web3Interface, constructWeb3Wrapper } from '../eth/lib/web3_wrapper';
 import { TimestampsCache } from './lib/timestamps_cache';
@@ -59,7 +59,7 @@ export class ERC20Worker extends BaseWorker {
     this.allOldContracts = [];
   }
 
-  async init(exporter?: KafkaStorage) {
+  async init(storage: KafkaStorage | Map<string, KafkaStorage>) {
     this.lastConfirmedBlock = await this.web3Wrapper.getBlockNumber() - this.settings.CONFIRMATIONS;
 
     if (this.settings.EXPORT_BLOCKS_LIST) {
@@ -84,10 +84,10 @@ export class ERC20Worker extends BaseWorker {
     }
 
     if (this.settings.EVENTS_IN_SAME_PARTITION) {
-      if (exporter === undefined) {
-        throw Error('Exporter reference need to be provided for events in same partition')
+      if (!(storage instanceof KafkaStorage)) {
+        throw Error('Single Kafka storage needs to be provided for events in same partition')
       }
-      await exporter.initPartitioner((event: any) => simpleHash(event.contract));
+      await storage.initPartitioner((event: any) => simpleHash(event.contract));
     }
   }
 
@@ -112,7 +112,7 @@ export class ERC20Worker extends BaseWorker {
     };
   }
 
-  async work() {
+  async work(): Promise<WorkResult | WorkResultMultiMode> {
     const workerContext = await analyzeWorkerContext(this);
     setWorkerSleepTime(this, workerContext);
     if (workerContext === NO_WORK_SLEEP) return [];

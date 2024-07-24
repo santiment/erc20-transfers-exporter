@@ -1,6 +1,7 @@
 const sinon = require('sinon');
 const rewire = require('rewire');
 import assert from 'assert';
+import { Server } from 'http'
 // For this test, presume we are creating the ETH worker
 process.env.BLOCKCHAIN = 'eth';
 process.env.TEST_ENV = 'true';
@@ -11,15 +12,15 @@ import { BaseWorker } from '../lib/worker_base';
 import { KafkaStorage } from '../lib/kafka_storage';
 import { ZookeeperState } from '../lib/zookeeper_state';
 import { ETHWorker } from '../blockchains/eth/eth_worker';
-import * as ethConstants from '../blockchains/eth/lib/constants';
 import zkClientAsync from '../lib/zookeeper_client_async';
 
 
-const blockchain = 'eth';
+
 describe('Main tests', () => {
   const constants = {
     START_BLOCK: -1,
-    START_PRIMARY_KEY: -1
+    START_PRIMARY_KEY: -1,
+    BLOCKCHAIN: 'eth'
   };
 
   let sandbox: any = null;
@@ -43,10 +44,14 @@ describe('Main tests', () => {
     sandbox.stub(KafkaStorage.prototype, 'initTransactions').resolves();
 
     try {
-      await mainInstance.init(blockchain);
+      const mergedConstants = {
+        KAFKA_TOPIC: 'NOT_USED',
+        ...constants
+      }
+      await mainInstance.init(mergedConstants);
     } catch (err) {
       if (err instanceof Error) {
-        assert.strictEqual(err.message, 'Error when initializing exporter: Exporter connection failed');
+        assert.strictEqual(err.message, 'Exporter connection failed');
       }
       else {
         assert.fail('Exception is not an instance of Error')
@@ -59,11 +64,15 @@ describe('Main tests', () => {
     sandbox.stub(KafkaStorage.prototype, 'initTransactions').rejects(new Error('Exporter initTransactions failed'));
 
     const mainInstance = new Main();
+    const mergedConstants = {
+      KAFKA_TOPIC: 'NOT_USED',
+      ...constants
+    }
     try {
-      await mainInstance.init(blockchain);
+      await mainInstance.init(mergedConstants);
     } catch (err) {
       if (err instanceof Error) {
-        assert.strictEqual(err.message, 'Error when initializing exporter: Exporter initTransactions failed');
+        assert.strictEqual(err.message, 'Exporter initTransactions failed');
       }
       else {
         assert.fail('Exception is not an instance of Error')
@@ -146,11 +155,19 @@ describe('Main tests', () => {
     }
   });
 
-  it('initWorker throws error when worker is already present', async () => {
+  it('init throws error when worker is already present', async () => {
+    sandbox.stub(KafkaStorage.prototype, 'connect').resolves();
+    sandbox.stub(KafkaStorage.prototype, 'initTransactions').resolves();
+    sandbox.stub(ZookeeperState.prototype, 'connect').resolves();
+
     const mainInstance = new Main();
     sandbox.stub(mainInstance, 'worker').value(new BaseWorker(constants));
+    const mergedConstants = {
+      KAFKA_TOPIC: 'NOT_USED',
+      ...constants
+    }
     try {
-      await mainInstance.initWorker('eth', {});
+      await mainInstance.init(mergedConstants);
       assert.fail('initWorker should have thrown an error');
     } catch (err) {
       if (err instanceof Error) {
@@ -162,13 +179,21 @@ describe('Main tests', () => {
     }
   });
 
-  it('initWorker throws an error when worker.init() fails', async () => {
+  it('init throws an error when worker.init() fails', async () => {
+    sandbox.stub(KafkaStorage.prototype, 'connect').resolves();
+    sandbox.stub(KafkaStorage.prototype, 'initTransactions').resolves();
+    sandbox.stub(ZookeeperState.prototype, 'connect').resolves();
+
     const mainInstance = new Main();
+    const mergedConstants = {
+      KAFKA_TOPIC: 'NOT_USED',
+      ...constants
+    }
 
     sandbox.stub(ETHWorker.prototype, 'init').rejects(new Error('Worker init failed'));
 
     try {
-      await mainInstance.initWorker('eth', ethConstants);
+      await mainInstance.init(mergedConstants);
       assert.fail('initWorker should have thrown an error');
     } catch (err) {
       if (err instanceof Error) {
@@ -180,14 +205,21 @@ describe('Main tests', () => {
     }
   });
 
-  it('initWorker throws an error when handleInitPosition() fails', async () => {
+  it('init throws an error when handleInitPosition() fails', async () => {
+    sandbox.stub(KafkaStorage.prototype, 'connect').resolves();
+    sandbox.stub(KafkaStorage.prototype, 'initTransactions').resolves();
+    sandbox.stub(ZookeeperState.prototype, 'connect').resolves();
     const mainInstance = new Main();
     sandbox.stub(ETHWorker.prototype, 'init').resolves();
 
     sandbox.stub(mainInstance, 'handleInitPosition').throws(new Error('Error when initializing position'));
 
+    const mergedConstants = {
+      KAFKA_TOPIC: 'NOT_USED',
+      ...constants
+    }
     try {
-      await mainInstance.initWorker('eth', ethConstants);
+      await mainInstance.init(mergedConstants);
       assert.fail('initWorker should have thrown an error');
     } catch (err) {
       if (err instanceof Error) {
@@ -200,12 +232,25 @@ describe('Main tests', () => {
   });
 
   it('initWorker success', async () => {
-    const mainInstance = new MainRewired();
-    sandbox.stub(ETHWorker.prototype, 'init').resolves();
-    sandbox.stub(mainInstance, 'handleInitPosition').resolves();
+    sandbox.stub(KafkaStorage.prototype, 'connect').resolves();
+    sandbox.stub(KafkaStorage.prototype, 'initTransactions').resolves();
+    sandbox.stub(ZookeeperState.prototype, 'connect').resolves();
+    sandbox.stub(Server.prototype, 'on')
+    sandbox.stub(Server.prototype, 'listen')
+    const mainInstance = new Main();
 
-    await mainInstance.initWorker('eth', ethConstants);
-    assert(mainInstance.handleInitPosition.calledOnce);
+    sandbox.stub(ETHWorker.prototype, 'init').resolves();
+    const handleInitPositionStub = sandbox.stub(mainInstance, 'handleInitPosition')
+
+
+    handleInitPositionStub.resolves();
+
+    const mergedConstants = {
+      KAFKA_TOPIC: 'NOT_USED',
+      ...constants
+    }
+    await mainInstance.init(mergedConstants);
+    assert(handleInitPositionStub.calledOnce);
   });
 
   it('workLoop throws error when worker can not be initialised', async () => {
@@ -226,13 +271,39 @@ describe('Main tests', () => {
   });
 
   it('workLoop throws error when storeEvents() fails', async () => {
+    class MockWorker extends BaseWorker {
+      constructor() {
+        super({});
+      }
+
+      work() {
+        return Promise.resolve([{}])
+      }
+      getLastProcessedPostion() {
+        return {}
+      }
+    }
+
+    class MockKafkaStorage extends KafkaStorage {
+      constructor() {
+        super('not_used', false, 'not_used')
+      }
+
+      async storeEvents() {
+        console.log("Store events mock")
+        throw new Error('storeEvents failed');
+      }
+    }
+
     sandbox.stub(BaseWorker.prototype, 'work').resolves([1, 2, 3]);
     sandbox.stub(Main.prototype, 'updateMetrics').returns(null);
     sandbox.stub(KafkaStorage.prototype, 'storeEvents').rejects(new Error('storeEvents failed'));
 
     const mainInstance = new Main();
-    sandbox.stub(mainInstance, 'worker').value(new BaseWorker(constants));
-    sandbox.stub(mainInstance, 'kafkaStorage').value(new KafkaStorage('test-exporter', true, 'topic-not-used'));
+    sandbox.stub(mainInstance, 'worker').value(new MockWorker());
+    sandbox.stub(mainInstance, 'kafkaStorage').value(new MockKafkaStorage());
+    sandbox.stub(mainInstance, 'mergedConstants').value({ WRITE_SIGNAL_RECORDS_KAFKA: false });
+
     try {
       await mainInstance.workLoop();
       assert.fail('workLoop should have thrown an error');
@@ -256,6 +327,7 @@ describe('Main tests', () => {
     sandbox.stub(mainInstance, 'worker').value(new BaseWorker(constants));
     sandbox.stub(mainInstance, 'kafkaStorage').value(new KafkaStorage('test-exporter', true, 'topic-not-used'));
     sandbox.stub(mainInstance, 'zookeeperState').value(new ZookeeperState('test-exporter', 'topic-not-used'));
+    sandbox.stub(mainInstance, 'mergedConstants').value({ WRITE_SIGNAL_RECORDS_KAFKA: false });
 
     try {
       await mainInstance.workLoop();
@@ -345,6 +417,4 @@ describe('main function', () => {
     sinon.assert.calledOnce(workLoopStub);
     sinon.assert.calledOnce(disconnectStub);
   });
-}
-
-);
+});

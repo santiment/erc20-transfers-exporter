@@ -36,3 +36,28 @@ export function assertIsDefined<T>(value: any, errorMsg: string): asserts value 
     throw Error(errorMsg);
   }
 }
+
+export type ModeToKafkaTopic = {
+  [topicName: string]: string;
+}
+
+export function parseKafkaTopicToObject(kafkaTopic: string): ModeToKafkaTopic {
+  const keyValuePairs = kafkaTopic.split(',');
+
+  const result: ModeToKafkaTopic = keyValuePairs.reduce((acc, pair) => {
+    const [key, value] = pair.split(':');
+    if (key && value) {
+      acc[key.trim()] = value;
+    }
+    else {
+      throw new Error(`key-value pair format is unexpected in KAFKA_TOPIC`);
+    }
+    return acc;
+  }, {} as ModeToKafkaTopic);
+
+  if (Object.keys(result).length < 1) {
+    throw new Error(`Can not construct multi mode from ${kafkaTopic}`)
+  }
+
+  return result;
+}

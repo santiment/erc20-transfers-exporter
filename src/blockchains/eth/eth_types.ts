@@ -91,6 +91,18 @@ export type ETHReceipt = {
   transactionIndex: string
 }
 
+export type ETHReceiptDecoded = {
+  blockNumber: number,
+  blockHash: string,
+  gasUsed: string,
+  transactionHash: string,
+  cumulativeGasUsed: string,
+  logs: any[],
+  transactionIndex: number,
+  status: number,
+  timestamp: string
+}
+
 export type ETHReceiptsMap = {
   [transactionHash: string]: ETHReceipt;
 }

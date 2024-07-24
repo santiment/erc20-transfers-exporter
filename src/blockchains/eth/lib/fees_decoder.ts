@@ -1,6 +1,6 @@
 import assert from 'assert'
 import { Web3Interface, safeCastToNumber } from './web3_wrapper';
-import { ETHBlock, ETHTransaction, ETHTransfer, ETHReceiptsMap } from '../eth_types';
+import { ETHBlock, ETHTransaction, ETHTransfer, ETHReceipt, ETHReceiptsMap } from '../eth_types';
 import { BURN_ADDRESS, LONDON_FORK_BLOCK } from './constants';
 
 
@@ -15,7 +15,7 @@ export class FeesDecoder {
     this.web3Wrapper = web3Wrapper;
   }
 
-  getPreLondonForkFees(transaction: ETHTransaction, block: ETHBlock, receipts: any): ETHTransfer[] {
+  getPreLondonForkFees(transaction: ETHTransaction, block: ETHBlock, receipts: ETHReceiptsMap): ETHTransfer[] {
     const gasExpense = BigInt(this.web3Wrapper.parseHexToNumber(transaction.gasPrice)) *
       BigInt(this.web3Wrapper.parseHexToNumber(receipts[transaction.hash].gasUsed));
     return [{
@@ -94,15 +94,19 @@ export class FeesDecoder {
     return result;
   }
 
-  getFeesFromTransactionsInBlock(block: ETHBlock, blockNumber: number, receipts: ETHReceiptsMap, isETH: boolean): ETHTransfer[] {
+  getFeesFromTransactionsInBlock(block: ETHBlock, blockNumber: number, receipts: ETHReceipt[], isETH: boolean): ETHTransfer[] {
     const result: ETHTransfer[] = [];
+    const receiptsMap: ETHReceiptsMap = {};
+    receipts.forEach((receipt: ETHReceipt) => {
+      receiptsMap[receipt.transactionHash] = receipt;
+    });
     block.transactions.forEach((transaction: ETHTransaction | string) => {
       assert(isETHTransaction(transaction), "To get fees, ETH transaction should be expanded and not just the hash.");
 
       const feeTransfers: ETHTransfer[] =
         isETH && blockNumber >= LONDON_FORK_BLOCK ?
-          this.getPostLondonForkFees(transaction, block, receipts) :
-          this.getPreLondonForkFees(transaction, block, receipts);
+          this.getPostLondonForkFees(transaction, block, receiptsMap) :
+          this.getPreLondonForkFees(transaction, block, receiptsMap);
 
       result.push(...feeTransfers);
     });

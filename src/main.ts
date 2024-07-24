@@ -4,20 +4,23 @@ import { Server, IncomingMessage, ServerResponse } from 'http'
 const { send, serve } = require('micro');
 const metrics = require('./lib/metrics');
 import { logger } from './lib/logger';
-import { Exporter } from './lib/kafka_storage';
+import { KafkaStorage } from './lib/kafka_storage';
+import { ZookeeperState } from './lib/zookeeper_state';
 const EXPORTER_NAME = process.env.EXPORTER_NAME || 'san-chain-exporter';
 import { EXPORT_TIMEOUT_MLS } from './lib/constants';
 import { constructWorker } from './blockchains/construct_worker'
-import * as constantsBase from './lib/constants';
 import { ExporterPosition } from './types'
-import { BaseWorker } from './lib/worker_base';
+import { BaseWorker, WorkResult, WorkResultMultiMode } from './lib/worker_base';
+import { parseKafkaTopicToObject } from './lib/utils';
 
 export class Main {
   private worker!: BaseWorker;
   private shouldWork: boolean;
-  private exporter!: Exporter;
+  private kafkaStorage!: KafkaStorage | Map<string, KafkaStorage>;
+  private zookeeperState!: ZookeeperState;
   private lastProcessedPosition!: ExporterPosition;
   private microServer: Server;
+  private mergedConstants: any;
 
   constructor() {
     this.shouldWork = true;
@@ -28,18 +31,35 @@ export class Main {
   }
 
   async initExporter(exporterName: string, isTransactions: boolean, kafkaTopic: string) {
-    const INIT_EXPORTER_ERR_MSG = 'Error when initializing exporter: ';
-    this.exporter = new Exporter(exporterName, isTransactions, kafkaTopic);
-    await this.exporter
-      .connect()
-      .then(() => this.exporter.initTransactions())
-      .catch((err) => { throw new Error(`${INIT_EXPORTER_ERR_MSG}${err.message}`); });
+    if (!kafkaTopic.includes(':')) {
+      logger.info(`Constructing single Kafka producer`)
+      this.kafkaStorage = new KafkaStorage(exporterName, isTransactions, kafkaTopic);
+      this.zookeeperState = new ZookeeperState(exporterName, kafkaTopic);
+    }
+    else {
+      const mapping = parseKafkaTopicToObject(kafkaTopic)
+
+      this.kafkaStorage = Object.entries(mapping).reduce((acc, [mode, topicName]) => {
+        acc.set(mode, new KafkaStorage(exporterName, isTransactions, topicName));
+        return acc;
+      }, new Map());
+
+      logger.info(`Constructed ${this.kafkaStorage.size} Kafka producers`)
+      this.zookeeperState = new ZookeeperState(exporterName, kafkaTopic);
+    }
+
+    const kafkaStoragesArray = (this.kafkaStorage instanceof Map) ? Array.from(this.kafkaStorage.values()) : [this.kafkaStorage]
+    if (kafkaStoragesArray.length === 0) {
+      throw new Error("At least one KafkaStorage needs to be constructed")
+    }
+    await Promise.all(kafkaStoragesArray.map(storage => storage.connect().then(() => storage.initTransactions())))
+    await this.zookeeperState.connect();
   }
 
   async handleInitPosition() {
-    const lastRecoveredPosition = await this.exporter.getLastPosition();
+    const lastRecoveredPosition = await this.zookeeperState.getLastPosition();
     this.lastProcessedPosition = this.worker.initPosition(lastRecoveredPosition);
-    await this.exporter.savePosition(this.lastProcessedPosition);
+    await this.zookeeperState.savePosition(this.lastProcessedPosition);
   }
 
   #isWorkerSet() {
@@ -59,19 +79,22 @@ export class Main {
     return copy;
   }
 
-  async initWorker(blockchain: string, mergedConstants: any) {
+  private async initWorker() {
     this.#isWorkerSet();
-    logger.info(`Applying the following settings: ${JSON.stringify(this.getSettingsWithHiddenPasswords(mergedConstants))}`);
-    this.worker = constructWorker(blockchain, mergedConstants);
-    await this.worker.init(this.exporter);
+    logger.info(`Applying the following settings: ${JSON.stringify(this.getSettingsWithHiddenPasswords(this.mergedConstants))}`);
+    this.worker = constructWorker(this.mergedConstants.BLOCKCHAIN, this.mergedConstants);
+    await this.worker.init(this.kafkaStorage);
     await this.handleInitPosition();
   }
 
-  async init(blockchain: string) {
-    const blockchainSpecificConstants = require(`./blockchains/${blockchain}/lib/constants`);
-    const mergedConstants = { ...constantsBase, ...blockchainSpecificConstants };
-    await this.initExporter(EXPORTER_NAME, true, mergedConstants.KAFKA_TOPIC);
-    await this.initWorker(blockchain, mergedConstants);
+  async init(constantsBase: any) {
+    if (constantsBase.BLOCKCHAIN === undefined) {
+      throw Error("'BLOCKCHAIN' variable need to be defined")
+    }
+    const blockchainSpecificConstants = require(`./blockchains/${constantsBase.BLOCKCHAIN}/lib/constants`);
+    this.mergedConstants = { ...constantsBase, ...blockchainSpecificConstants };
+    await this.initExporter(EXPORTER_NAME, true, this.mergedConstants.KAFKA_TOPIC);
+    await this.initWorker();
     metrics.startCollection();
 
     this.microServer.on('error', (err) => {
@@ -94,20 +117,47 @@ export class Main {
     metrics.lastExportedBlock.set(this.worker.lastExportedBlock);
   }
 
+  async writeDataToKafka(workResult: WorkResult | WorkResultMultiMode) {
+    if (Array.isArray(workResult)) {
+      if (!(this.kafkaStorage instanceof KafkaStorage)) {
+        throw new Error('Worker returns data for single Kafka storage and multiple are defined')
+      }
+
+      if (workResult.length > 0) {
+        await this.kafkaStorage.storeEvents(workResult, this.mergedConstants.WRITE_SIGNAL_RECORDS_KAFKA);
+      }
+    }
+    else if (typeof workResult === 'object') {
+      if (!(this.kafkaStorage instanceof Map)) {
+        throw new Error('Worker returns data for multiple Kafka storages and single is defined')
+      }
+      for (const [mode, data] of Object.entries(workResult)) {
+        const kafkaStoragePerMode = this.kafkaStorage.get(mode)
+        if (!kafkaStoragePerMode) {
+          throw Error(`Workers returns data for mode ${mode} and no worker is defined for this mode`)
+        }
+
+        await kafkaStoragePerMode.storeEvents(data, this.mergedConstants.WRITE_SIGNAL_RECORDS_KAFKA);
+      }
+    }
+    else {
+      throw new Error('Worker returns unexpected data type')
+    }
+  }
+
   async workLoop() {
     while (this.shouldWork) {
       this.worker.lastRequestStartTime = Date.now();
-      const events = await this.worker.work();
+      const workResult: WorkResult | WorkResultMultiMode = await this.worker.work();
 
       this.worker.lastExportTime = Date.now();
 
       this.updateMetrics();
       this.lastProcessedPosition = this.worker.getLastProcessedPosition();
 
-      if (events && events.length > 0) {
-        await this.exporter.storeEvents(events, constantsBase.WRITE_SIGNAL_RECORDS_KAFKA);
-      }
-      await this.exporter.savePosition(this.lastProcessedPosition);
+      await this.writeDataToKafka(workResult);
+
+      await this.zookeeperState.savePosition(this.lastProcessedPosition);
       logger.info(`Progressed to position ${JSON.stringify(this.lastProcessedPosition)}, last confirmed Node block: ${this.worker.lastConfirmedBlock}`);
 
       if (this.shouldWork) {
@@ -117,11 +167,16 @@ export class Main {
   }
 
   async disconnect() {
-    // This call should be refactored to work with async/await
-    if (this.exporter !== undefined) {
-      this.exporter.disconnect();
+    if (this.kafkaStorage instanceof KafkaStorage) {
+      await this.kafkaStorage.disconnect();
     }
-    if (this.microServer !== undefined) {
+    else if (this.kafkaStorage instanceof Map) {
+      await Promise.all(Array.from(this.kafkaStorage.values()).map(storage => storage.disconnect()));
+    }
+    if (this.zookeeperState) {
+      await this.zookeeperState.disconnect();
+    }
+    if (this.microServer) {
       this.microServer.close();
     }
   }
@@ -137,29 +192,32 @@ export class Main {
     }
   }
 
-  healthcheckKafka(): Promise<void> {
-    if (this.exporter.isConnected()) {
-      return Promise.resolve();
-    } else {
-      return Promise.reject('Kafka client is not connected to any brokers');
+  healthcheckKafka(): boolean {
+    if (this.kafkaStorage instanceof KafkaStorage) {
+      return this.kafkaStorage.isConnected();
+    }
+    else if (this.kafkaStorage instanceof Map) {
+      return Array.from(this.kafkaStorage.values()).every(storage => storage.isConnected());
+    }
+    else {
+      return false;
     }
   }
 
-  healthcheckExportTimeout(): Promise<string | void> {
+  healthcheckExportTimeout(): boolean {
     const timeFromLastExport = Date.now() - this.worker.lastExportTime;
     const isExportTimeoutExceeded = timeFromLastExport > EXPORT_TIMEOUT_MLS;
     if (isExportTimeoutExceeded) {
-      const errorMessage = `Time from the last export ${timeFromLastExport}ms exceeded limit ` +
-        `${EXPORT_TIMEOUT_MLS}ms. Node last block is ${this.worker.lastConfirmedBlock}.`;
-      return Promise.reject(errorMessage);
+      logger.warn(`Time from the last export ${timeFromLastExport}ms exceeded limit ` +
+        `${EXPORT_TIMEOUT_MLS}ms. Node last block is ${this.worker.lastConfirmedBlock}.`);
+      return false;
     } else {
-      return Promise.resolve();
+      return true;
     }
   }
 
-  healthcheck(): Promise<string | void> {
-    return this.healthcheckKafka()
-      .then(() => this.healthcheckExportTimeout());
+  healthcheck(): boolean {
+    return this.healthcheckKafka() && this.healthcheckExportTimeout();
   }
 }
 
@@ -178,12 +236,13 @@ const microHandler = async (request: IncomingMessage, response: ServerResponse, 
 
   switch (req.pathname) {
     case '/healthcheck':
-      return mainInstance.healthcheck()
-        .then(() => send(response, 200, 'ok'))
-        .catch((err: any) => {
-          logger.error(`Healthcheck failed: ${err.toString()}`);
-          send(response, 500, err.toString());
-        });
+      if (mainInstance.healthcheck()) {
+        return send(response, 200, 'ok');
+      }
+      else {
+        logger.error('Healthcheck failed');
+        return send(response, 500, "Healthcheck failed");
+      }
     case '/metrics':
       response.setHeader('Content-Type', metrics.register.contentType);
       return send(response, 200, await metrics.register.metrics());

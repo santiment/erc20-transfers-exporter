@@ -6,7 +6,6 @@ import { ETHWorker } from './eth/eth_worker';
 import { ETHBlocksWorker } from './eth_blocks/eth_blocks_worker';
 import { ETHContractsWorker } from './eth_contracts/eth_contracts_worker';
 import { MaticWorker } from './matic/matic_worker';
-import { ReceiptsWorker } from './receipts/receipts_worker';
 import { UTXOWorker } from './utxo/utxo_worker';
 import { XRPWorker } from './xrp/xrp_worker';
 
@@ -22,8 +21,6 @@ export function constructWorker(blockchain: string, settings: any): BaseWorker {
       return new ETHBlocksWorker(settings);
     case 'matic':
       return new MaticWorker(settings);
-    case 'receipts':
-      return new ReceiptsWorker(settings);
     case 'utxo':
       return new UTXOWorker(settings);
     case 'xrp':

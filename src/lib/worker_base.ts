@@ -1,7 +1,10 @@
 'use strict';
 import { logger } from './logger';
-import { Exporter } from './kafka_storage';
+import { KafkaStorage } from './kafka_storage';
 import { ExporterPosition } from '../types'
+
+export type WorkResult = any[]
+export type WorkResultMultiMode = { [key: string]: WorkResult; }
 
 export class BaseWorker {
   public lastExportTime: number;
@@ -30,11 +33,11 @@ export class BaseWorker {
    * Upon returning from the method call the implementation should have updated all the member variables of the
    * base class.
    */
-  work(): Promise<Array<any>> {
+  work(): Promise<WorkResult | WorkResultMultiMode> {
     throw new Error('"work" method need to be overriden');
   }
   // To be implemented on inheritance.
-  async init(_exporter: Exporter) {
+  async init(_storage: KafkaStorage | Map<string, KafkaStorage>) {
     throw new Error('"init" method need to be overriden');
   }
 

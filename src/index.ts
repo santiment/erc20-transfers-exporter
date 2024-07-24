@@ -1,6 +1,6 @@
 'use strict';
 import { logger } from './lib/logger';
-import { BLOCKCHAIN } from './lib/constants';
+import * as constantsBase from './lib/constants';
 import { getBoolEnvVariable } from './lib/utils';
 import { Main } from './main'
 
@@ -11,10 +11,7 @@ export async function main() {
   mainInstance = new Main();
 
   try {
-    if (BLOCKCHAIN === undefined) {
-      throw Error("'BLOCKCHAIN' variable need to be defined")
-    }
-    await mainInstance.init(BLOCKCHAIN);
+    await mainInstance.init(constantsBase);
   } catch (err: any) {
     logger.error(err.stack);
     throw new Error(`Error initializing exporter: ${err.message}`);

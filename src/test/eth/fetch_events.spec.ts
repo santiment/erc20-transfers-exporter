@@ -3,7 +3,7 @@ import { ETHWorker } from '../../blockchains/eth/eth_worker';
 import * as constants from '../../blockchains/eth/lib/constants';
 import { injectDAOHackTransfers, DAO_HACK_ADDRESSES, DAO_HACK_FORK_BLOCK } from '../../blockchains/eth/lib/dao_hack';
 import { Web3Interface, constructWeb3WrapperNoCredentials } from '../../blockchains/eth/lib/web3_wrapper';
-import { ETHBlock, ETHReceiptsMap, ETHTransfer } from '../../blockchains/eth/eth_types';
+import { ETHBlock, ETHReceipt, ETHTransfer } from '../../blockchains/eth/eth_types';
 
 describe('fetch past events', function () {
   const transaction = {
@@ -45,8 +45,7 @@ describe('fetch past events', function () {
       transactions: [transaction],
     });
 
-  const receipts: ETHReceiptsMap = {
-    '0x1a06a3a86d2897741f3ddd774df060a63d626b01197c62015f404e1f007fa04d':
+  const receipts: ETHReceipt[] = [
     {
       'blockHash': '0x22854625d4c18b3034461851a6fb181209e77a242adbd923989e7113a60fec56',
       'blockNumber': '0x572559',
@@ -80,7 +79,7 @@ describe('fetch past events', function () {
       'transactionHash': '0x1a06a3a86d2897741f3ddd774df060a63d626b01197c62015f404e1f007fa04d',
       'transactionIndex': '0x0'
     }
-  };
+  ];
   const trace = {
     'action': {
       'callType': 'call',

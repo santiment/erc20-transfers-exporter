@@ -10,5 +10,7 @@ export const BLOCK_INTERVAL = getIntEnvVariable('BLOCK_INTERVAL', 100);
 export const RECEIPTS_API_METHOD = process.env.RECEIPTS_API_METHOD || 'eth_getBlockReceipts';
 export const NODE_URL = process.env.NODE_URL || 'http://localhost:8545/';
 export const LOOP_INTERVAL_CURRENT_MODE_SEC = getIntEnvVariable('LOOP_INTERVAL_CURRENT_MODE_SEC', 30);
+export const NATIVE_TOKEN_MODE = 'native_token_transfers';
+export const RECEIPTS_MODE = 'receipts';
 
 

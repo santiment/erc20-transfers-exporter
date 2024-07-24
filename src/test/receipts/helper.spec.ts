@@ -1,76 +1,9 @@
 import assert from 'assert';
-import helper from '../../blockchains/receipts/lib/helper';
+import { decodeReceipt } from '../../blockchains/eth/lib/helper_receipts';
 import { Web3Interface, constructWeb3WrapperNoCredentials } from '../../blockchains/eth/lib/web3_wrapper';
 import { NODE_URL } from '../../blockchains/eth/lib/constants';
 
 const web3Wrapper: Web3Interface = constructWeb3WrapperNoCredentials(NODE_URL);
-
-describe('blocks parsing', () => {
-  it('parses blocks', () => {
-    const responses = [
-      {
-        jsonrpc: '2.0',
-        result: { timestamp: '0x56c097f1', number: '0xf53d5' }
-      },
-      {
-        jsonrpc: '2.0',
-        result: { timestamp: '0x56c097f4', number: '0xf5408' }
-      }
-    ];
-
-    const result = helper.parseBlocks(responses);
-    assert.deepStrictEqual(result, [
-      { timestamp: '0x56c097f1', number: '0xf53d5' },
-      { timestamp: '0x56c097f4', number: '0xf5408' }
-    ]);
-  });
-});
-
-describe('receipt parsing', () => {
-  it('parses receipts', () => {
-    const responses = [
-      {
-        jsonrpc: '2.0',
-        result: [
-          {
-            blockHash: '0x209bc40be9e6961d88435382b91754b7a6e180d6cbf9120a61246e1d2506f3a6',
-            blockNumber: '0xf4fbb',
-            contractAddress: null,
-            cumulativeGasUsed: '0x5208',
-            from: '0x2a65aca4d5fc5b5c859090a6c34d164135398226',
-            gasUsed: '0x5208',
-            logs: [],
-            logsBloom: '0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
-            root: '0x1806fd9f2ef8bf8dce03665b4c80a1740efe4194f90864c662e7af6a80a02a08',
-            to: '0xe33977e292ccef99ea8828733e97562f3690a8ad',
-            transactionHash: '0x88217032c83348c7aae522090d7a5b932609860a5f6760e98e9048f6ddc55ad8',
-            transactionIndex: '0x0'
-          }
-        ]
-      }
-    ];
-
-    const result = helper.parseReceipts(responses);
-    assert.deepStrictEqual(result,
-      [
-        {
-          blockHash: '0x209bc40be9e6961d88435382b91754b7a6e180d6cbf9120a61246e1d2506f3a6',
-          blockNumber: '0xf4fbb',
-          contractAddress: null,
-          cumulativeGasUsed: '0x5208',
-          from: '0x2a65aca4d5fc5b5c859090a6c34d164135398226',
-          gasUsed: '0x5208',
-          logs: [],
-          logsBloom: '0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
-          root: '0x1806fd9f2ef8bf8dce03665b4c80a1740efe4194f90864c662e7af6a80a02a08',
-          to: '0xe33977e292ccef99ea8828733e97562f3690a8ad',
-          transactionHash: '0x88217032c83348c7aae522090d7a5b932609860a5f6760e98e9048f6ddc55ad8',
-          transactionIndex: '0x0'
-        }
-      ]
-    );
-  });
-});
 
 
 context('receipt without logs', () => {
@@ -91,7 +24,7 @@ context('receipt without logs', () => {
 
   describe('receipt decoding', () => {
     it('converts blockNumber from hex to number', () => {
-      const result = helper.decodeReceipt(receipt, web3Wrapper);
+      const result = decodeReceipt(receipt, web3Wrapper);
 
       const expected = {
         blockHash: '0x209bc40be9e6961d88435382b91754b7a6e180d6cbf9120a61246e1d2506f3a6',
@@ -171,19 +104,11 @@ context('receipt with logs', () => {
         transactionIndex: 4
       };
 
-      const result = helper.decodeReceipt(receipt, web3Wrapper);
+      const result = decodeReceipt(receipt, web3Wrapper);
 
       assert.deepStrictEqual(result, expected);
     });
   });
 });
 
-describe('setting reciept\'s timestamp', () => {
-  it('sets receipt\'s timestamp', async () => {
-    const receipt = { blockNumber: 1004250 };
-    const timestamps = { '1004250': 1455576747 };
-    const result = await helper.setReceiptsTimestamp([receipt], timestamps);
 
-    assert.deepStrictEqual(result, [{ blockNumber: 1004250, timestamp: 1455576747 }]);
-  });
-});

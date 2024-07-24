@@ -1,6 +1,6 @@
 import { filterErrors } from './filter_errors';
 import { Web3Interface } from './web3_wrapper';
-import { Trace, ETHBlock, ETHReceiptsMap, ETHReceipt } from '../eth_types';
+import { Trace, ETHBlock, ETHReceipt } from '../eth_types';
 import { HTTPClientInterface } from '../../../types'
 
 
@@ -15,13 +15,14 @@ export function parseEthInternalTrx(result: Trace[]): Trace[] {
     );
 }
 
-export function fetchEthInternalTrx(ethClient: HTTPClientInterface,
+export async function fetchEthInternalTrx(ethClient: HTTPClientInterface,
   web3Wrapper: Web3Interface, fromBlock: number, toBlock: number): Promise<Trace[]> {
   const filterParams = {
     fromBlock: web3Wrapper.parseNumberToHex(fromBlock),
     toBlock: web3Wrapper.parseNumberToHex(toBlock)
   };
-  return ethClient.request('trace_filter', [filterParams]).then((data: any) => parseEthInternalTrx(data['result']));
+  const data: any = await ethClient.request('trace_filter', [filterParams]);
+  return parseEthInternalTrx(data['result']);
 }
 
 export async function fetchBlocks(ethClient: HTTPClientInterface,
@@ -43,7 +44,7 @@ export async function fetchBlocks(ethClient: HTTPClientInterface,
 }
 
 export async function fetchReceipts(ethClient: HTTPClientInterface,
-  web3Wrapper: Web3Interface, receiptsAPIMethod: string, fromBlock: number, toBlock: number): Promise<ETHReceiptsMap> {
+  web3Wrapper: Web3Interface, receiptsAPIMethod: string, fromBlock: number, toBlock: number): Promise<ETHReceipt[]> {
   const batch: any[] = [];
   for (let currBlock = fromBlock; currBlock <= toBlock; currBlock++) {
     batch.push(
@@ -54,12 +55,12 @@ export async function fetchReceipts(ethClient: HTTPClientInterface,
     );
   }
   const finishedRequests = await ethClient.requestBulk(batch);
-  const result: ETHReceiptsMap = {};
+  const result: ETHReceipt[] = [];
 
   finishedRequests.forEach((response: any) => {
     if (response.result) {
       response.result.forEach((receipt: ETHReceipt) => {
-        result[receipt.transactionHash] = receipt;
+        result.push(receipt);
       });
     }
     else {

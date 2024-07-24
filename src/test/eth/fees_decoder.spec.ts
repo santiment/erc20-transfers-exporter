@@ -156,15 +156,6 @@ const receipts_json_pre_london: ETHReceipt[] = [{
 }];
 
 
-function turnReceiptsToMap(receipts: any[]) {
-  const result: any = {};
-  receipts.forEach((receipt: any) => {
-    result[receipt.transactionHash] = receipt;
-  });
-
-  return result;
-}
-
 describe('Fees decoder test', function () {
   const web3Wrapper: Web3Interface = constructWeb3WrapperNoCredentials(constants.NODE_URL);
   const feesDecoder = new FeesDecoder(web3Wrapper);
@@ -172,7 +163,7 @@ describe('Fees decoder test', function () {
   it('test fees post London zero priority', async function () {
     const postLondonFees = feesDecoder.getFeesFromTransactionsInBlock(block_json_post_london_zero_priority,
       safeCastToNumber(web3Wrapper.parseHexToNumber(block_json_post_london_zero_priority.number)),
-      turnReceiptsToMap(receipts_json_post_london_no_priority), true);
+      receipts_json_post_london_no_priority, true);
 
     const expected = [{
       from: '0xea674fdde714fd979de3edf0f56aa9716b898ec8',
@@ -192,7 +183,7 @@ describe('Fees decoder test', function () {
   it('test fees post London with priority', async function () {
     const postLondonFees = feesDecoder.getFeesFromTransactionsInBlock(block_json_post_london_with_priority,
       safeCastToNumber(web3Wrapper.parseHexToNumber(block_json_post_london_with_priority.number)),
-      turnReceiptsToMap(receipts_json_post_london_with_priority), true);
+      receipts_json_post_london_with_priority, true);
 
     const expected = [{
       blockNumber: 13447057,
@@ -222,7 +213,7 @@ describe('Fees decoder test', function () {
   it('test old type fees post London', async function () {
     const postLondonFees = feesDecoder.getFeesFromTransactionsInBlock(block_json_post_london_old_tx_type,
       safeCastToNumber(web3Wrapper.parseHexToNumber(block_json_post_london_old_tx_type.number)),
-      turnReceiptsToMap(receipts_json_post_london_old_tx_type), true);
+      receipts_json_post_london_old_tx_type, true);
 
     const expected = [{
       blockNumber: 13318440,
@@ -252,7 +243,7 @@ describe('Fees decoder test', function () {
   it('test fees pre London', async function () {
     const preLondonFees = feesDecoder.getFeesFromTransactionsInBlock(block_json_pre_london,
       safeCastToNumber(web3Wrapper.parseHexToNumber(block_json_pre_london.number)),
-      turnReceiptsToMap(receipts_json_pre_london), true);
+      receipts_json_pre_london, true);
 
     const expected = [{
       from: '0x39fa8c5f2793459d6622857e7d9fbb4bd91766d3',

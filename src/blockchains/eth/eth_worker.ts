@@ -3,7 +3,7 @@ import { constructRPCClient } from '../../lib/http_client';
 import { injectDAOHackTransfers, DAO_HACK_FORK_BLOCK } from './lib/dao_hack';
 import { getGenesisTransfers } from './lib/genesis_transfers';
 import { transactionOrder, stableSort } from './lib/util';
-import { BaseWorker } from '../../lib/worker_base';
+import { BaseWorker, WorkResult, WorkResultMultiMode } from '../../lib/worker_base';
 import { Web3Interface, constructWeb3Wrapper, safeCastToNumber } from './lib/web3_wrapper';
 import { decodeTransferTrace } from './lib/decode_transfers';
 import { FeesDecoder } from './lib/fees_decoder';
@@ -11,15 +11,17 @@ import { nextIntervalCalculator, analyzeWorkerContext, setWorkerSleepTime, NO_WO
 import { WithdrawalsDecoder } from './lib/withdrawals_decoder';
 import { fetchEthInternalTrx, fetchBlocks, fetchReceipts } from './lib/fetch_data';
 import { HTTPClientInterface } from '../../types';
-import { Trace, ETHBlock, ETHTransfer, ETHReceiptsMap } from './eth_types';
+import { Trace, ETHBlock, ETHTransfer, ETHReceipt } from './eth_types';
 import { EOB, collectEndOfBlocks } from './lib/end_of_block';
-
+import { assertIsDefined, parseKafkaTopicToObject } from '../../lib/utils';
+import { decodeReceipt } from './lib/helper_receipts'
 
 export class ETHWorker extends BaseWorker {
   private web3Wrapper: Web3Interface;
   private ethClient: HTTPClientInterface;
   private feesDecoder: FeesDecoder;
   private withdrawalsDecoder: WithdrawalsDecoder;
+  private modes: string[];
 
   constructor(settings: any) {
     super(settings);
@@ -31,19 +33,18 @@ export class ETHWorker extends BaseWorker {
 
     this.feesDecoder = new FeesDecoder(this.web3Wrapper);
     this.withdrawalsDecoder = new WithdrawalsDecoder(this.web3Wrapper);
+    this.modes = [];
   }
 
-  async fetchData(fromBlock: number, toBlock: number): Promise<[Trace[], Map<number, ETHBlock>, ETHReceiptsMap]> {
-    return await Promise.all([
-      fetchEthInternalTrx(this.ethClient, this.web3Wrapper, fromBlock, toBlock),
-      fetchBlocks(this.ethClient, this.web3Wrapper, fromBlock, toBlock, true),
-      fetchReceipts(this.ethClient, this.web3Wrapper,
-        this.settings.RECEIPTS_API_METHOD, fromBlock, toBlock),
-    ]);
+  async fetchData(fromBlock: number, toBlock: number): Promise<[Trace[], Map<number, ETHBlock>, ETHReceipt[]]> {
+    const traces: Promise<Trace[]> = this.isTracesNeeded() ? fetchEthInternalTrx(this.ethClient, this.web3Wrapper, fromBlock, toBlock) : Promise.resolve([]);
+    const blocks: Promise<Map<number, ETHBlock>> = fetchBlocks(this.ethClient, this.web3Wrapper, fromBlock, toBlock, true);
+    const receipts: Promise<ETHReceipt[]> = this.isReceiptsNeeded() ? fetchReceipts(this.ethClient, this.web3Wrapper,
+      this.settings.RECEIPTS_API_METHOD, fromBlock, toBlock) : Promise.resolve([]);
+    return await Promise.all([traces, blocks, receipts]);
   }
 
-  transformPastEvents(fromBlock: number, toBlock: number, traces: Trace[],
-    blocks: any, receipts: ETHReceiptsMap): ETHTransfer[] {
+  transformPastEvents(fromBlock: number, toBlock: number, traces: Trace[], blocks: any, receipts: ETHReceipt[]): ETHTransfer[] {
     let events: ETHTransfer[] = [];
     if (fromBlock === 0) {
       logger.info('Adding the GENESIS transfers');
@@ -78,7 +79,7 @@ export class ETHWorker extends BaseWorker {
     return result;
   }
 
-  transformPastTransactionEvents(blocks: ETHBlock[], receipts: ETHReceiptsMap): ETHTransfer[] {
+  transformPastTransactionEvents(blocks: ETHBlock[], receipts: ETHReceipt[]): ETHTransfer[] {
     const result: ETHTransfer[] = [];
 
     for (const block of blocks) {
@@ -95,17 +96,23 @@ export class ETHWorker extends BaseWorker {
     return result;
   }
 
-  async work(): Promise<(ETHTransfer | EOB)[]> {
-    const workerContext = await analyzeWorkerContext(this);
-    setWorkerSleepTime(this, workerContext);
-    if (workerContext === NO_WORK_SLEEP) return [];
+  isReceiptsNeeded(): boolean {
+    return this.modes.includes(this.settings.NATIVE_TOKEN_MODE) || this.modes.includes(this.settings.RECEIPTS_MODE)
+  }
 
-    const { fromBlock, toBlock } = nextIntervalCalculator(this);
-    logger.info(`Fetching transfer events for interval ${fromBlock}:${toBlock}`);
-    const [traces, blocks, receipts] = await this.fetchData(fromBlock, toBlock);
-    let events: (ETHTransfer | EOB)[] = this.transformPastEvents(fromBlock, toBlock, traces, blocks, receipts);
+  isTracesNeeded(): boolean {
+    return this.modes.includes(this.settings.NATIVE_TOKEN_MODE)
+  }
 
-    events.push(...collectEndOfBlocks(fromBlock, toBlock, blocks, this.web3Wrapper))
+  getTransfersOutput(fromBlock: number, toBlock: number, traces: Trace[],
+    blocks: Map<number, ETHBlock>, receipts: ETHReceipt[], endOfBlockEvents: EOB[]): WorkResult {
+    assertIsDefined(traces, "Traces are needed for native token transfers");
+    assertIsDefined(receipts, "Receipts are needed for native token transfers");
+
+    const events: (ETHTransfer | EOB)[] = this.transformPastEvents(fromBlock, toBlock, traces, blocks, receipts);
+
+
+    events.push(...endOfBlockEvents)
     if (events.length > 0) {
       stableSort(events, transactionOrder);
       extendEventsWithPrimaryKey(events, this.lastPrimaryKey);
@@ -113,13 +120,60 @@ export class ETHWorker extends BaseWorker {
       this.lastPrimaryKey += events.length;
     }
 
+    return events;
+  }
+
+  getReceiptsOutput(blocks: Map<number, ETHBlock>, receipts: ETHReceipt[]): WorkResult {
+    assertIsDefined(receipts, "Receipts are needed for receipts extraction");
+    assertIsDefined(blocks, "Blocks are needed for extraction");
+    const decodedReceipts = receipts.map((receipt: any) => decodeReceipt(receipt, this.web3Wrapper));
+    decodedReceipts.forEach(receipt => {
+      const block = blocks.get(receipt.blockNumber)
+      assertIsDefined(block, `Block ${receipt.blockNumber} is missing`)
+      receipt.timestamp = block.timestamp;
+    });
+    return decodedReceipts;
+  }
+
+  async work(): Promise<WorkResultMultiMode> {
+    const result: WorkResultMultiMode = {};
+    const workerContext = await analyzeWorkerContext(this);
+    setWorkerSleepTime(this, workerContext);
+    if (workerContext === NO_WORK_SLEEP) return result;
+
+    const { fromBlock, toBlock } = nextIntervalCalculator(this);
+
+    logger.info(`Fetching events for interval ${fromBlock}:${toBlock}`);
+
+    const [traces, blocks, receipts] = await this.fetchData(fromBlock, toBlock);
+
+
     this.lastExportedBlock = toBlock;
 
-    return events;
+    assertIsDefined(blocks, "Blocks are needed for extraction");
+    // TODO consider if EOB events should also be present in other output topics
+    const endOfBlockEvents = collectEndOfBlocks(fromBlock, toBlock, blocks, this.web3Wrapper)
+    if (this.modes.includes(this.settings.NATIVE_TOKEN_MODE)) {
+      result[this.settings.NATIVE_TOKEN_MODE] = this.getTransfersOutput(fromBlock, toBlock, traces, blocks,
+        receipts, endOfBlockEvents);
+    }
+    if (this.modes.includes(this.settings.RECEIPTS_MODE)) {
+      result[this.settings.RECEIPTS_MODE] = this.getReceiptsOutput(blocks, receipts);
+    }
+
+    return result;
   }
 
   async init(): Promise<void> {
     this.lastConfirmedBlock = await this.web3Wrapper.getBlockNumber() - this.settings.CONFIRMATIONS;
+
+    if (!this.settings.KAFKA_TOPIC.includes(":")) {
+      throw new Error("ETH worker, expects KAFKA_TOPIC in mode:name format")
+    }
+    else {
+      const mapping = parseKafkaTopicToObject(this.settings.KAFKA_TOPIC)
+      this.modes = Object.keys(mapping);
+    }
   }
 }
 

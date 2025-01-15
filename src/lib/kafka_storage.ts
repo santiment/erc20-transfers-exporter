@@ -1,14 +1,10 @@
 import crypto from 'crypto';
-import Kafka, { LibrdKafkaError, ProducerGlobalConfig } from 'node-rdkafka';
+import Kafka, { ProducerGlobalConfig } from 'node-rdkafka';
 import { BLOCKCHAIN } from './constants';
-import ZookeeperClientAsync from './zookeeper_client_async';
 import { log_according_to_syslog_level, logger, SYSLOG_LOG_LEVEL } from './logger';
 
 
 const ZOOKEEPER_URL: string = process.env.ZOOKEEPER_URL || 'localhost:2181';
-const ZOOKEEPER_RETRIES: number = parseInt(process.env.ZOOKEEPER_RETRIES || '0');
-const ZOOKEEPER_SPIN_DELAY: number = parseInt(process.env.ZOOKEEPER_SPIN_DELAY || '1000');
-const ZOOKEEPER_SESSION_TIMEOUT: number = parseInt(process.env.ZOOKEEPER_SESSION_TIMEOUT || '30000');
 
 const FORMAT_HEADER: string = 'format=json;';
 const RDKAFKA_DEBUG: string | null = process.env.RDKAFKA_DEBUG || null;
@@ -18,17 +14,6 @@ const KAFKA_FLUSH_TIMEOUT: number = parseInt(process.env.KAFKA_FLUSH_TIMEOUT || 
 const BUFFERING_MAX_MESSAGES: number = parseInt(process.env.BUFFERING_MAX_MESSAGES || '150000');
 const TRANSACTIONS_TIMEOUT_MS: number = parseInt(process.env.TRANSACTIONS_TIMEOUT_MS || '60000');
 const KAFKA_MESSAGE_MAX_BYTES: number = parseInt(process.env.KAFKA_MESSAGE_MAX_BYTES || '10485760');
-
-process.on('unhandledRejection', (reason: unknown, p: Promise<unknown>): void => {
-  // Otherwise unhandled promises are not possible to trace with the information logged
-  if (reason instanceof Error) {
-    logger.error('Unhandled Rejection at: ', p, 'reason:', reason, 'error stack:', (reason as Error).stack);
-  }
-  else {
-    logger.error('Unhandled Rejection at: ', p, 'reason:', reason);
-  }
-  process.exit(1);
-});
 
 /**
  * A class to pick partition for an event.
@@ -99,11 +84,10 @@ function castCompression(compression: string): 'none' | 'gzip' | 'snappy' | 'lz4
   throw new Error(`Invalid compression value: ${compression}`);
 }
 
-export class Exporter {
+export class KafkaStorage {
   private readonly exporter_name: string;
   private readonly producer: Kafka.Producer;
   private readonly topicName: string;
-  private readonly zookeeperClient: ZookeeperClientAsync;
   private partitioner: Partitioner | null;
 
   constructor(exporter_name: string, transactional: boolean, topicName: string) {
@@ -139,14 +123,6 @@ export class Exporter {
       log_according_to_syslog_level(log.severity, log.fac, log.message);
     });
 
-    this.zookeeperClient = new ZookeeperClientAsync(ZOOKEEPER_URL,
-      {
-        sessionTimeout: ZOOKEEPER_SESSION_TIMEOUT,
-        spinDelay: ZOOKEEPER_SPIN_DELAY,
-        retries: ZOOKEEPER_RETRIES
-      }
-    );
-
     this.partitioner = null;
   }
 
@@ -162,20 +138,13 @@ export class Exporter {
   /**
    * @returns {Promise} Promise, resolved on connection completed.
    */
-  async connect() {
+  async connect(): Promise<void> {
     logger.info(`Connecting to zookeeper host ${ZOOKEEPER_URL}`);
 
-    try {
-      await this.zookeeperClient.connectAsync();
-    }
-    catch (ex) {
-      console.error('Error connecting to Zookeeper: ', ex);
-      throw ex;
-    }
 
     logger.info(`Connecting to kafka host ${KAFKA_URL}`);
-    const promise_result = new Promise((resolve, reject) => {
-      this.producer.on('ready', resolve);
+    const promise_result = new Promise<void>((resolve, reject) => {
+      this.producer.on('ready', () => resolve());
       this.producer.on('event.error', reject);
       // The user can provide a callback for delivery reports with the
       // dedicated method 'subscribeDeliveryReports'.
@@ -190,131 +159,23 @@ export class Exporter {
   }
 
   /**
-   * Disconnect from Zookeeper and Kafka.
+   * Disconnect from Kafka.
    * This method is completed once the callback is invoked.
    */
-  disconnect(callback?: () => void) {
-    logger.info(`Disconnecting from zookeeper host ${ZOOKEEPER_URL}`);
-    this.zookeeperClient.closeAsync().then(() => {
-      if (this.producer.isConnected()) {
-        logger.info(`Disconnecting from kafka host ${KAFKA_URL}`);
-        this.producer.disconnect(callback);
-      }
-      else {
-        logger.info(`Producer is NOT connected to kafka host ${KAFKA_URL}`);
-      }
-    });
-  }
-
-  async getLastPosition() {
-    if (await this.zookeeperClient.existsAsync(this.zookeeperPositionNode)) {
-      const previousPosition = await this.zookeeperClient.getDataAsync(
-        this.zookeeperPositionNode
-      );
-
-      try {
-        if (Buffer.isBuffer(previousPosition && previousPosition.data)) {
-          const value = previousPosition.data.toString('utf8');
-
-          if (value.startsWith(FORMAT_HEADER)) {
-            return JSON.parse(value.replace(FORMAT_HEADER, ''));
-          } else {
-            return previousPosition.data;
-          }
-        }
-      } catch (err) {
-        logger.error(err);
-      }
+  async disconnect(): Promise<void> {
+    if (!this.producer.isConnected()) {
+      logger.info(`Producer is NOT connected to kafka host ${KAFKA_URL}`);
+      return;
     }
 
-    return null;
+    logger.info(`Disconnecting from kafka host ${KAFKA_URL}`);
+    const promise_result = new Promise<void>((resolve, reject) => {
+      this.producer.disconnect(() => resolve());
+    })
+
+    await promise_result;
   }
 
-  async getLastBlockTimestamp() {
-    if (await this.zookeeperClient.existsAsync(this.zookeeperTimestampNode)) {
-      const previousPosition = await this.zookeeperClient.getDataAsync(
-        this.zookeeperTimestampNode
-      );
-
-      try {
-        if (Buffer.isBuffer(previousPosition && previousPosition.data)) {
-          const value = previousPosition.data.toString('utf8');
-
-          if (value.startsWith(FORMAT_HEADER)) {
-            return JSON.parse(value.replace(FORMAT_HEADER, ''));
-          } else {
-            return previousPosition.data;
-          }
-        }
-      } catch (err) {
-        logger.error(err);
-      }
-    }
-
-    return null;
-  }
-
-  async savePosition(position: object) {
-    if (typeof position !== 'undefined') {
-      const newNodeValue = Buffer.from(
-        FORMAT_HEADER + JSON.stringify(position),
-        'utf-8'
-      );
-
-      if (await this.zookeeperClient.existsAsync(this.zookeeperPositionNode)) {
-        return this.zookeeperClient.setDataAsync(
-          this.zookeeperPositionNode,
-          newNodeValue
-        );
-      } else {
-        return this.zookeeperClient.mkdirpAsync(
-          this.zookeeperPositionNode,
-          newNodeValue
-        );
-      }
-    }
-  }
-
-  async saveLastBlockTimestamp(blockTimestamp: number) {
-    if (typeof blockTimestamp !== 'undefined') {
-      const newNodeValue = Buffer.from(
-        FORMAT_HEADER + JSON.stringify(blockTimestamp),
-        'utf-8'
-      );
-
-      if (await this.zookeeperClient.existsAsync(this.zookeeperTimestampNode)) {
-        return this.zookeeperClient.setDataAsync(
-          this.zookeeperTimestampNode,
-          newNodeValue
-        );
-      } else {
-        return this.zookeeperClient.mkdirpAsync(
-          this.zookeeperTimestampNode,
-          newNodeValue
-        );
-      }
-    }
-  }
-
-  async sendData(events: Array<any>) {
-    if (events.constructor !== Array) {
-      events = [events];
-    }
-
-    events = events.map(
-      event => (typeof event === 'object' ? JSON.stringify(event) : event)
-    );
-    events.forEach(event => {
-      this.producer.produce(this.topicName, null, Buffer.from(event));
-    });
-
-    return new Promise<void>((resolve, reject) =>
-      this.producer.flush(KAFKA_FLUSH_TIMEOUT, (err: LibrdKafkaError) => {
-        if (err) return reject(err);
-        resolve();
-      })
-    );
-  }
 
   async sendDataWithKey(events: object | Array<object>, keyField: string, signalRecordData: object | null) {
     const arrayEvents: Array<object> = (events.constructor !== Array) ? [events] : events

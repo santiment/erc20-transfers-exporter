@@ -2,7 +2,7 @@
 import { logger } from '../../lib/logger';
 import { constructRPCClient } from '../../lib/http_client';
 import { BaseWorker } from '../../lib/worker_base';
-import { Exporter } from '../../lib/kafka_storage';
+import { KafkaStorage } from '../../lib/kafka_storage';
 import { HTTPClientInterface } from '../../types';
 
 
@@ -33,7 +33,7 @@ export class UTXOWorker extends BaseWorker {
     this.client = constructRPCClient(this.NODE_URL, this.RPC_USERNAME, this.RPC_PASSWORD, this.DEFAULT_TIMEOUT);
   }
 
-  async init(exporter: Exporter) {
+  async init(exporter: KafkaStorage) {
     const blockchainInfo = await this.sendRequestWithRetry('getblockchaininfo', []);
     this.lastConfirmedBlock = blockchainInfo.blocks - this.CONFIRMATIONS;
     await exporter.initPartitioner((event: any) => event['height']);

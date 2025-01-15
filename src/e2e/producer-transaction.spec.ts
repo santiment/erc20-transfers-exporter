@@ -1,4 +1,4 @@
-import { Exporter } from '../lib/kafka_storage';
+import { KafkaStorage } from '../lib/kafka_storage';
 import Kafka from 'node-rdkafka';
 const KAFKA_URL: string = assertStringEnv(process.env.KAFKA_URL);
 const KAFKA_TOPIC: string = assertStringEnv(process.env.KAFKA_TOPIC);
@@ -81,26 +81,26 @@ class TestConsumer {
 
 
 describe('Producer transactions', function () {
-  let exporter: Exporter;
+  let kafkaStorage: KafkaStorage;
   let testConsumer: TestConsumer;
   let num_messages_test = 3;
 
   beforeEach(function (done) {
     this.timeout(20000);
 
-    exporter = new Exporter('test-exporter', true, KAFKA_TOPIC);
-    exporter.connect().then(() => {
+    kafkaStorage = new KafkaStorage('test-exporter', true, KAFKA_TOPIC);
+    kafkaStorage.connect().then(() => {
       testConsumer = new TestConsumer(KAFKA_TOPIC, num_messages_test);
       done();
     });
   });
 
-  afterEach(function (done) {
+  afterEach(async function (done) {
     this.timeout(10000);
-    exporter.disconnect(() => {
-      testConsumer.disconnect(function () {
-        done();
-      });
+    await kafkaStorage.disconnect()
+
+    testConsumer.disconnect(function () {
+      done();
     });
   });
 
@@ -109,21 +109,21 @@ describe('Producer transactions', function () {
 
     await testConsumer.waitSubscribed();
 
-    await exporter.initTransactions();
-    await exporter.beginTransaction();
+    await kafkaStorage.initTransactions();
+    await kafkaStorage.beginTransaction();
 
     // Do a small delay before starting writing messages, otherwise the consumer is missing them.
     // This should not really be needed, because we have received the 'subscribed' event in the
     // consumer but there is something I am missing.
     setTimeout(async function () {
       for (let i = 0; i < num_messages_test; i++) {
-        exporter.sendDataWithKey({
+        kafkaStorage.sendDataWithKey({
           timestamp: 10000000,
           iso_date: new Date().toISOString(),
           key: 1
         }, 'key', null);
       }
-      await exporter.commitTransaction();
+      await kafkaStorage.commitTransaction();
     }, 2000);
 
     await testConsumer.waitData();
@@ -132,7 +132,7 @@ describe('Producer transactions', function () {
   it('using the \'storeEvents\' function should begin and commit a transaction', async function () {
     // We need the huge timeout because starting and closing a transaction takes around 1 sec
     this.timeout(10000);
-    await exporter.initTransactions();
+    await kafkaStorage.initTransactions();
 
     const testEvent = {
       'contract': '0xdac17f958d2ee523a2206206994597c13d831ec7',
@@ -151,7 +151,7 @@ describe('Producer transactions', function () {
 
     setTimeout(async function () {
       for (let i = 0; i < num_messages_test; i++) {
-        await exporter.storeEvents([testEvent], false);
+        await kafkaStorage.storeEvents([testEvent], false);
       }
     }, 1000);
 

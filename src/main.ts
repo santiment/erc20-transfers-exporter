@@ -4,7 +4,8 @@ import { Server, IncomingMessage, ServerResponse } from 'http'
 const { send, serve } = require('micro');
 const metrics = require('./lib/metrics');
 import { logger } from './lib/logger';
-import { Exporter } from './lib/kafka_storage';
+import { KafkaStorage } from './lib/kafka_storage';
+import { ZookeeperState } from './lib/zookeeper_state';
 const EXPORTER_NAME = process.env.EXPORTER_NAME || 'san-chain-exporter';
 import { EXPORT_TIMEOUT_MLS } from './lib/constants';
 import { constructWorker } from './blockchains/construct_worker'
@@ -15,7 +16,8 @@ import { BaseWorker } from './lib/worker_base';
 export class Main {
   private worker!: BaseWorker;
   private shouldWork: boolean;
-  private exporter!: Exporter;
+  private kafkaStorage!: KafkaStorage;
+  private zookeeperState!: ZookeeperState;
   private lastProcessedPosition!: ExporterPosition;
   private microServer: Server;
 
@@ -29,17 +31,21 @@ export class Main {
 
   async initExporter(exporterName: string, isTransactions: boolean, kafkaTopic: string) {
     const INIT_EXPORTER_ERR_MSG = 'Error when initializing exporter: ';
-    this.exporter = new Exporter(exporterName, isTransactions, kafkaTopic);
-    await this.exporter
+    this.kafkaStorage = new KafkaStorage(exporterName, isTransactions, kafkaTopic);
+    this.zookeeperState = new ZookeeperState(exporterName, kafkaTopic);
+    await this.kafkaStorage
       .connect()
-      .then(() => this.exporter.initTransactions())
+      .then(() => this.kafkaStorage.initTransactions())
+      .catch((err) => { throw new Error(`${INIT_EXPORTER_ERR_MSG}${err.message}`); });
+    await this.zookeeperState
+      .connect()
       .catch((err) => { throw new Error(`${INIT_EXPORTER_ERR_MSG}${err.message}`); });
   }
 
   async handleInitPosition() {
-    const lastRecoveredPosition = await this.exporter.getLastPosition();
+    const lastRecoveredPosition = await this.zookeeperState.getLastPosition();
     this.lastProcessedPosition = this.worker.initPosition(lastRecoveredPosition);
-    await this.exporter.savePosition(this.lastProcessedPosition);
+    await this.zookeeperState.savePosition(this.lastProcessedPosition);
   }
 
   #isWorkerSet() {
@@ -63,7 +69,7 @@ export class Main {
     this.#isWorkerSet();
     logger.info(`Applying the following settings: ${JSON.stringify(this.getSettingsWithHiddenPasswords(mergedConstants))}`);
     this.worker = constructWorker(blockchain, mergedConstants);
-    await this.worker.init(this.exporter);
+    await this.worker.init(this.kafkaStorage);
     await this.handleInitPosition();
   }
 
@@ -105,9 +111,9 @@ export class Main {
       this.lastProcessedPosition = this.worker.getLastProcessedPosition();
 
       if (events && events.length > 0) {
-        await this.exporter.storeEvents(events, constantsBase.WRITE_SIGNAL_RECORDS_KAFKA);
+        await this.kafkaStorage.storeEvents(events, constantsBase.WRITE_SIGNAL_RECORDS_KAFKA);
       }
-      await this.exporter.savePosition(this.lastProcessedPosition);
+      await this.zookeeperState.savePosition(this.lastProcessedPosition);
       logger.info(`Progressed to position ${JSON.stringify(this.lastProcessedPosition)}, last confirmed Node block: ${this.worker.lastConfirmedBlock}`);
 
       if (this.shouldWork) {
@@ -117,11 +123,13 @@ export class Main {
   }
 
   async disconnect() {
-    // This call should be refactored to work with async/await
-    if (this.exporter !== undefined) {
-      this.exporter.disconnect();
+    if (this.kafkaStorage) {
+      await this.kafkaStorage.disconnect();
     }
-    if (this.microServer !== undefined) {
+    if (this.zookeeperState) {
+      await this.zookeeperState.disconnect();
+    }
+    if (this.microServer) {
       this.microServer.close();
     }
   }
@@ -138,7 +146,7 @@ export class Main {
   }
 
   healthcheckKafka(): Promise<void> {
-    if (this.exporter.isConnected()) {
+    if (this.kafkaStorage.isConnected()) {
       return Promise.resolve();
     } else {
       return Promise.reject('Kafka client is not connected to any brokers');

@@ -1,0 +1,95 @@
+kafka.sh cons icp_exporter_test_topic_v1 0 1 100000000 | grep ":19844"
+{"timestamp":1620707948346371600,"blockNumber":19844,"transactionHash":"fa0a5514cd0f2df14ef5224d1c3e4e910e6ccc73f3f210a8c461279e1e8cc7e0","from":"660b1680dafeedaa68c1f1f4cf8af42ed1dfb8564646efe935a2b9a48528b605","to":"4d54202639e96911c6e4dd5efdb017f67f384c34b4c73b9bad21c978d7bdd578","value":"87360975","symbol":"ICP","type":"TRANSACTION"}
+{"timestamp":1620707948346371600,"blockNumber":19844,"transactionHash":"fa0a5514cd0f2df14ef5224d1c3e4e910e6ccc73f3f210a8c461279e1e8cc7e0","from":"660b1680dafeedaa68c1f1f4cf8af42ed1dfb8564646efe935a2b9a48528b605","to":"burn","value":"-10000","symbol":"ICP","type":"FEE"}
+{"timestamp":1620707948346371600,"blockNumber":19844,"transactionHash":"fa0a5514cd0f2df14ef5224d1c3e4e910e6ccc73f3f210a8c461279e1e8cc7e0","from":"660b1680dafeedaa68c1f1f4cf8af42ed1dfb8564646efe935a2b9a48528b605","to":"4d54202639e96911c6e4dd5efdb017f67f384c34b4c73b9bad21c978d7bdd578","value":"87360975","symbol":"ICP","type":"FEE"}
+
+curl -X POST https://icp-rosetta-backup.santiment.net/block -u 'icp-rosetta-san:6Nw9WSuiPwVT9jwFF5TO' --header 'Content-Type: application/json' --data '{"network_identifier": {"blockchain":"Internet Computer","network":"00000000000000020101"},                   "block_identifier": {"index": 19844}     }'| jq  
+
+
+{
+  "block_identifier": {
+    "index": 19844,
+    "hash": "a6a34840ea13c0b87d3f16bd6efd8d959b9650e76457d134968655bac4da9428"
+  },
+  "parent_block_identifier": {
+    "index": 19843,
+    "hash": "b8f4b5cdb524621daf29588ca3d8bcd843a73a6fd2e4cfefc6e97fd6bac39e04"
+  },
+  "timestamp": 1620707948346,
+  "transactions": [
+    {
+      "transaction_identifier": {
+        "hash": "fa0a5514cd0f2df14ef5224d1c3e4e910e6ccc73f3f210a8c461279e1e8cc7e0"
+      },
+      "operations": [
+        {
+          "operation_identifier": {
+            "index": 0
+          },
+          "type": "TRANSACTION",
+          "status": "COMPLETED",
+          "account": {
+            "address": "660b1680dafeedaa68c1f1f4cf8af42ed1dfb8564646efe935a2b9a48528b605"
+          },
+          "amount": {
+            "value": "-87360975",
+            "currency": {
+              "symbol": "ICP",
+              "decimals": 8
+            }
+          }
+        },
+        {
+          "operation_identifier": {
+            "index": 1
+          },
+          "type": "TRANSACTION",
+          "status": "COMPLETED",
+          "account": {
+            "address": "4d54202639e96911c6e4dd5efdb017f67f384c34b4c73b9bad21c978d7bdd578"
+          },
+          "amount": {
+            "value": "87360975",
+            "currency": {
+              "symbol": "ICP",
+              "decimals": 8
+            }
+          }
+        },
+        {
+          "operation_identifier": {
+            "index": 2
+          },
+          "type": "FEE",
+          "status": "COMPLETED",
+          "account": {
+            "address": "660b1680dafeedaa68c1f1f4cf8af42ed1dfb8564646efe935a2b9a48528b605"
+          },
+          "amount": {
+            "value": "-10000",
+            "currency": {
+              "symbol": "ICP",
+              "decimals": 8
+            }
+          }
+        }
+      ],
+      "metadata": {
+        "block_height": 19844,
+        "memo": 2638649830122411500,
+        "timestamp": 1620707948346371600
+      }
+    }
+  ]
+}
+
+
+{"timestamp":"2024-10-19T10:01:17.769Z","level":"info","message":"Transactions:","message1":"[\n  {\n    \"timestamp\": \"1705654398263141400\",\n  
+\"blockNumber\": 9890653,\n    \"transactionHash\": \"b102ba34e19d2772ac666b85b47520d3c1eeb2cfc857dcd6a564630e8b0d8317\",\n    
+\"from\": \"4dfa940def17f1427ae47378c440f10185867677109a02bc8374fc25b9dee8af\",\n    \"to\": \"a62b069af6d6384f3cc355b8c2477f8ffdfed04e84a5259cb8980172666deb0e\",\n
+\"value\": \"8062430323\",\n    \"symbol\": \"ICP\",\n    \"type\": \"TRANSACTION\"\n  },\n  {\n    \"timestamp\": \"1705654398263141400\",\n
+\"blockNumber\": 9890653,\n    \"transactionHash\": \"b102ba34e19d2772ac666b85b47520d3c1eeb2cfc857dcd6a564630e8b0d8317\",\n
+\"from\": \"4dfa940def17f1427ae47378c440f10185867677109a02bc8374fc25b9dee8af\",\n    \"to\": \"burn\",\n    \"value\": \"10000\",\n
+\"symbol\": \"ICP\",\n    \"type\": \"FEE\"\n  },\n  {\n    \"timestamp\": \"1705654398263141400\",\n    \"blockNumber\": 9890653,\n
+    \"transactionHash\": \"b102ba34e19d2772ac666b85b47520d3c1eeb2cfc857dcd6a564630e8b0d8317\",\n    \"from\": \"4dfa940def17f1427ae47378c440f10185867677109a02bc8374fc25b9dee8af\",\n
+        \"to\": \"a62b069af6d6384f3cc355b8c2477f8ffdfed04e84a5259cb8980172666deb0e\",\n    \"value\": \"8062430323\",\n    \"symbol\": \"ICP\",\n    \"type\": \"FEE\"\n  }\n]"}

@@ -28,6 +28,7 @@ type OperationIdentifier = {
 
 type Allowance = {
     currency: Currency;
+    value: string;
 };
 
 type EffectiveFee = {

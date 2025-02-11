@@ -198,8 +198,8 @@ export class ICRCWorker extends BaseWorker {
               transactionHash: txHash,
               from: operation.account.address + '/' + operation.account.sub_account.address,
               to:  operation.account.address,
-              value: operation.metadata.value,
-              symbol: operation.metadata.value,
+              value: operation.metadata.allowance.value,
+              symbol: operation.metadata.allowance.currency.symbol,
               type: operation.type,
             };
             transactions.push(transactionJson);

@@ -1,6 +1,6 @@
 'use strict';
 import { logger } from '../../lib/logger';
-import { Exporter } from '../../lib/kafka_storage';
+import { KafkaStorage } from '../../lib/kafka_storage';
 import { constructRPCClient } from '../../lib/http_client';
 import { extendEventsWithPrimaryKey } from './lib/extend_events_key';
 import { ContractOverwrite, changeContractAddresses, extractChangedContractAddresses } from './lib/contract_overwrite';
@@ -60,7 +60,7 @@ export class ERC20Worker extends BaseWorker {
     this.allOldContracts = [];
   }
 
-  async init(exporter?: Exporter) {
+  async init(exporter?: KafkaStorage) {
     this.lastConfirmedBlock = await this.web3Wrapper.getBlockNumber() - this.settings.CONFIRMATIONS;
 
     if (this.settings.EXPORT_BLOCKS_LIST) {

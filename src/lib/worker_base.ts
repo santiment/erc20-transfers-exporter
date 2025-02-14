@@ -1,6 +1,6 @@
 'use strict';
 import { logger } from './logger';
-import { Exporter } from './kafka_storage';
+import { KafkaStorage } from './kafka_storage';
 import { ExporterPosition } from '../types'
 
 export class BaseWorker {
@@ -34,7 +34,7 @@ export class BaseWorker {
     throw new Error('"work" method need to be overriden');
   }
   // To be implemented on inheritance.
-  async init(_exporter: Exporter) {
+  async init(_exporter: KafkaStorage) {
     throw new Error('"init" method need to be overriden');
   }
 
